@@ -46,12 +46,30 @@ Validation: leave-one-water-year-out splits to avoid autocorrelation leakage. He
 ## Repository layout
 
 ```
-src/co_river_flow_forecast/   Python package
-  data/                       Data fetchers (USGS, eventually SNOTEL, NWP, ...)
-scripts/                      Exploratory entry points
-data/                         Local data cache (gitignored)
+src/co_river_flow_forecast/
+  basins.py                   Basin registry (the source of truth)
+  water_year.py               Water-year arithmetic shared by all scripts
+  data/                       Data fetchers (USGS, SNOTEL; NWP / reservoir next)
+scripts/                      Basin-parameterized entry points (--basin <slug>)
+data/processed/<basin>/       Per-basin outputs (gitignored)
 tests/                        Tests
 ```
+
+## Adding a new basin
+
+All basin-specific metadata lives in [src/co_river_flow_forecast/basins.py](src/co_river_flow_forecast/basins.py). To add a basin, append a `Basin` instance:
+
+```python
+NEW_BASIN = Basin(
+    name="Eagle River at Avon",
+    short_name="eagle_avon",
+    usgs_id="09067020",
+    huc8="14010003",
+    snotel_triplets=("...:CO:SNTL", ...),
+)
+```
+
+Add it to `_ALL`, and every `scripts/basin_*.py` script will pick it up via `--basin eagle_avon`. Outputs land in `data/processed/eagle_avon/`. All new modeling code should follow the same pattern: take a `Basin`, derive everything else from it. No basin-specific entry points.
 
 ## Getting started
 
@@ -60,13 +78,16 @@ tests/                        Tests
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e .
 
-# Pull and summarize the Yampa @ Steamboat streamflow record:
-.venv\Scripts\python.exe scripts\yampa_first_look.py
+# Streamflow climatology for a basin:
+.venv\Scripts\python.exe scripts\basin_flow_climatology.py --basin yampa_steamboat
+
+# SNOTEL SWE summary (and SWE-vs-flow correlation if the flow CSV exists):
+.venv\Scripts\python.exe scripts\basin_snotel_summary.py --basin yampa_steamboat
 ```
 
 ## Status
 
-Phase 1, day 1. USGS streamflow ingest works for Yampa @ Steamboat; nothing else is wired up yet.
+Phase 1, day 1. USGS streamflow and SNOTEL SWE ingest work for Yampa @ Steamboat through a basin-parameterized pipeline. NWP, reservoir, and modeling layers not wired up yet.
 
 ## License
 
