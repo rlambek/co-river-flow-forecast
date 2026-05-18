@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project data cache (kept locally, not committed)
+data/*
+!data/.gitkeep
+
