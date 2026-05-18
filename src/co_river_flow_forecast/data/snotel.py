@@ -1,12 +1,79 @@
-"""SNOTEL daily SWE retrieval via metloom."""
+"""SNOTEL daily SWE retrieval and basin-polygon-based station discovery via metloom."""
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 from metloom.pointdata import SnotelPointData
 from metloom.variables import SnotelVariables
+
+from co_river_flow_forecast.basins import Basin
+
+
+def discover_snotel_sites(basin: Basin) -> list[dict[str, Any]]:
+    """Find SNOTEL stations whose location falls within the basin polygon.
+
+    Pulls the upstream-of-gauge polygon from NLDI (cached), then asks metloom
+    for SNOTEL stations within that polygon that report SWE. Returns a list of
+    station-info dicts with keys: triplet, name, elevation_ft, lat, lon.
+    """
+    # Local imports keep geopandas + shapely off the module-import path for
+    # callers that only need fetch_daily_swe().
+    import geopandas as gpd
+
+    from co_river_flow_forecast.data.basin_geometry import get_basin_polygon
+
+    polygon = get_basin_polygon(basin)
+    gdf = gpd.GeoDataFrame({"name": [basin.short_name]}, geometry=[polygon], crs="EPSG:4326")
+
+    collection = SnotelPointData.points_from_geometry(
+        gdf,
+        [SnotelVariables.SWE],
+        snow_courses=False,
+        within_geometry=True,
+    )
+
+    out: list[dict[str, Any]] = []
+    for pt in collection:
+        info = _station_info(pt)
+        out.append(info)
+    # Sort by elevation descending so the highest-altitude (most snow-relevant)
+    # stations come first.
+    out.sort(key=lambda s: -(s.get("elevation_ft") or 0))
+    return out
+
+
+def _station_info(pt: SnotelPointData) -> dict[str, Any]:
+    triplet = getattr(pt, "id", None) or getattr(pt, "station_id", None) or ""
+    name = getattr(pt, "name", "") or ""
+    elevation = None
+    lat = None
+    lon = None
+    try:
+        meta = pt.metadata  # property; may issue a network call
+    except Exception:
+        meta = None
+    if meta is not None:
+        # metloom returns a shapely Point with x=lon, y=lat, z=elevation in many cases.
+        try:
+            lon, lat = float(meta.x), float(meta.y)
+            elevation = float(meta.z) if meta.has_z else None
+        except Exception:
+            pass
+        # Or a dict-like metadata
+        if isinstance(meta, dict):
+            name = meta.get("name", name) or name
+            elevation = meta.get("elevation", elevation)
+            lat = meta.get("latitude", lat)
+            lon = meta.get("longitude", lon)
+    return {
+        "triplet": triplet,
+        "name": name,
+        "elevation_ft": elevation,
+        "lat": lat,
+        "lon": lon,
+    }
 
 
 def fetch_daily_swe(

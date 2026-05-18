@@ -81,13 +81,25 @@ python -m venv .venv
 # Streamflow climatology for a basin:
 .venv\Scripts\python.exe scripts\basin_flow_climatology.py --basin yampa_steamboat
 
-# SNOTEL SWE summary (and SWE-vs-flow correlation if the flow CSV exists):
+# Discover SNOTEL stations in the upstream-of-gauge polygon (NLDI + metloom):
+.venv\Scripts\python.exe scripts\basin_discover_sites.py --basin yampa_steamboat
+
+# SNOTEL SWE summary (curated list, or --discover to re-derive):
 .venv\Scripts\python.exe scripts\basin_snotel_summary.py --basin yampa_steamboat
+
+# GFS forecast at the basin centroid for D+0..D+7:
+.venv\Scripts\python.exe scripts\basin_nwp_latest.py --basin yampa_steamboat
 ```
 
 ## Status
 
-Phase 1, day 1. USGS streamflow and SNOTEL SWE ingest work for Yampa @ Steamboat through a basin-parameterized pipeline. NWP, reservoir, and modeling layers not wired up yet.
+Phase 1 ingest is wired up for Yampa @ Steamboat:
+
+- USGS daily streamflow via `dataretrieval`.
+- SNOTEL daily SWE via `metloom`, with NLDI-based upstream-polygon discovery of stations.
+- GFS surface temperature and precipitation via `herbie-data` (smoke test only — point extraction at basin centroid, D+0..D+7).
+
+Adding a new basin requires only an outlet USGS gauge ID; SNOTEL stations are discoverable, basin polygon is fetched from NLDI on demand. Reservoir/operational baselines and the modeling heads are not wired up yet.
 
 ## License
 

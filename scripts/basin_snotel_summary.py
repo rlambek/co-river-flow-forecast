@@ -21,19 +21,25 @@ import os
 import pandas as pd
 
 from co_river_flow_forecast.basins import get_basin
-from co_river_flow_forecast.data import fetch_daily_swe
+from co_river_flow_forecast.data import discover_snotel_sites, fetch_daily_swe
 from co_river_flow_forecast.water_year import doy_to_calendar, water_year, water_year_doy
 
 
-def main(basin_short: str, start: str) -> None:
+def main(basin_short: str, start: str, discover: bool = False) -> None:
     basin = get_basin(basin_short)
-    if not basin.snotel_triplets:
-        raise SystemExit(f"Basin {basin.short_name} has no SNOTEL stations registered.")
+    triplets: tuple[str, ...] = basin.snotel_triplets
+    if discover or not triplets:
+        print(f"Discovering SNOTEL stations in upstream basin of {basin.usgs_id}...")
+        triplets = tuple(s["triplet"] for s in discover_snotel_sites(basin))
+        print(f"  discovered {len(triplets)} stations.")
 
-    print(f"Fetching daily SWE for {len(basin.snotel_triplets)} SNOTEL stations in {basin.name}")
-    print(f"  triplets: {', '.join(basin.snotel_triplets)}")
+    if not triplets:
+        raise SystemExit(f"No SNOTEL stations available for {basin.short_name}.")
+
+    print(f"Fetching daily SWE for {len(triplets)} SNOTEL stations in {basin.name}")
+    print(f"  triplets: {', '.join(triplets)}")
     print(f"  start:    {start}")
-    daily = fetch_daily_swe(basin.snotel_triplets, start=start)
+    daily = fetch_daily_swe(triplets, start=start)
     if daily.empty:
         raise SystemExit("metloom returned no data.")
     print(f"  rows:     {len(daily):,}")
@@ -109,5 +115,10 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--basin", default="yampa_steamboat", help="Basin short_name (see basins.py)")
     p.add_argument("--start", default="1990-10-01", help="Earliest date to pull (ISO)")
+    p.add_argument(
+        "--discover",
+        action="store_true",
+        help="Discover SNOTEL stations from NLDI polygon, ignoring any curated list in basins.py",
+    )
     args = p.parse_args()
-    main(args.basin, args.start)
+    main(args.basin, args.start, discover=args.discover)

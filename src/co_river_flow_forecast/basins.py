@@ -26,13 +26,13 @@ YAMPA_AT_STEAMBOAT = Basin(
     usgs_id="09239500",
     huc8="14050001",  # Upper Yampa
     snotel_triplets=(
-        # Two confirmed Upper-Yampa SNOTELs. TODO: enrich via HUC-polygon
-        # intersection (NRCS WBD + metloom.SnotelPointData.points_from_geometry)
-        # rather than hand-curating. Tower SNOTEL in particular needs verifying;
-        # site 482 is the snow course (monthly only), and 1041 appears to be
-        # a different, lower-elevation station.
-        "709:CO:SNTL",   # Rabbit Ears
-        "840:CO:SNTL",   # Walton Creek
+        # Discovered via NLDI upstream-of-gauge polygon + metloom on 2026-05-18.
+        # To refresh: scripts/basin_discover_sites.py --basin yampa_steamboat
+        "825:CO:SNTL",   # Tower (10,610 ft)
+        "709:CO:SNTL",   # Rabbit Ears (9,390 ft)
+        "1061:CO:SNTL",  # Bear River (9,100 ft)
+        "426:CO:SNTL",   # Crosho (8,960 ft)
+        "457:CO:SNTL",   # Dry Lake (8,240 ft)
     ),
     notes="Park Range / Rabbit Ears Pass headwaters. Daily record from 1904.",
 )
