@@ -7,41 +7,66 @@ The aim is to throw the whole kitchen sink at the problem: snowpack, terrain ins
 ## Phases
 
 1. **Gauged rivers.** Build, validate, and report forecasts for Colorado rivers with USGS streamflow gauges. The forecast horizon is 7 days; the peak-window prediction is a ~7-day envelope around expected peak discharge.
-2. **Ungauged rivers.** Once Phase 1 is reporting reliably, extend the model to ungauged reaches by transferring skill from analog gauged basins (regionalization).
+2. **Ungauged rivers.** Once Phase 1 is reporting reliably, extend the model to ungauged reaches via regionalization (donor-basin transfer from analog gauged basins).
 
-## Inputs we want to use
+Phase 1 prototype basin: **Yampa River at Steamboat Springs, CO** — USGS gauge `09239500`, daily record back to 1904.
 
-| Signal                          | Candidate source                                                           |
-| ------------------------------- | -------------------------------------------------------------------------- |
-| Streamflow (target + history)   | USGS NWIS (`waterservices.usgs.gov`) via `dataRetrieval` / direct API      |
-| Snowpack (SWE, depth)           | NRCS SNOTEL / AWDB REST API; SNODAS gridded SWE                            |
-| Snow-covered area               | MODIS MOD10A1 / VIIRS snow products                                        |
-| Terrain & insolation            | USGS 3DEP DEM → slope, aspect, modeled potential solar radiation per pixel |
-| Weather forecast                | NOAA NWS NDFD / GFS / HRRR; ECMWF where available                          |
-| Observed weather                | NOAA GHCN-D, RAWS, MesoWest                                                |
-| Basin history & climatology     | Derived from USGS + PRISM / Daymet                                         |
-| Reservoir storage & outflow     | USBR Reclamation `RISE`; CO DWR; USACE for select dams                     |
-| Planned releases                | USBR 24-Month Study / Annual Operating Plan; basin-specific schedules      |
+## Prior art we're standing on
 
-## Approach (sketch, will evolve)
+- **DrivenData Water Supply Forecast Rodeo** (2023–24) — predicts seasonal volumes at 26 Western US sites *including Yampa @ Steamboat*. The [runtime repo](https://github.com/drivendataorg/water-supply-forecast-rodeo-runtime) bundles ingest for SNOTEL, SWANN, USGS, CDEC, PDSI, ECMWF, MJO. [Winners' code](https://github.com/drivendataorg/water-supply-forecast-rodeo) (CatBoost quantile ensembles) is also public. Our horizon is shorter (7-day vs seasonal) but their data plumbing is reusable.
+- **NeuralHydrology** ([repo](https://github.com/neuralhydrology/neuralhydrology), Kratzert et al.) — the de-facto regional LSTM library for CAMELS-style daily discharge. Our continuous-flow head starts here, pretrained on Caravan / CAMELS-US.
+- **NRCS M4** ([repo](https://github.com/nrcs-nwcc/M4)) — what NRCS actually runs operationally for seasonal water-supply forecasts; CatBoost/XGB multi-model. Confirms that gradient-boosted quantile models work for the seasonal target.
+- **Operational baselines we ingest as features and must beat:** NWM medium/long-range, CBRFC ESP traces, NRCS monthly volume forecasts. If we don't beat CBRFC ESP on Yampa, we don't have a product.
+- **USGS SIR 2021-5016** (Day, 2021) — Upper Yampa assessment showing a ~22% downward trend in April mean flow at 09239500 and earlier snowmelt timing since 1992. Useful prior on peak-timing drift.
 
-- Per basin, assemble a daily feature table: SWE, melt-degree-days, accumulated insolation on snow-bearing aspects, antecedent precipitation, upstream reservoir state, and forecast weather out to D+7.
-- Train two heads:
-  - **Peak-window classifier/regressor** — probability mass over the next 14 days that the seasonal peak falls in each day; collapse to a 7-day window.
-  - **Flow regressor** — sequence-to-sequence model producing daily discharge D+1..D+7 with prediction intervals.
-- Validate with leave-one-water-year-out splits to avoid leakage from autocorrelated series.
+## Inputs and tooling
+
+| Signal                        | Source                            | Python tool                          |
+| ----------------------------- | --------------------------------- | ------------------------------------ |
+| Streamflow (target + history) | USGS NWIS                         | `dataretrieval`                      |
+| Snowpack (SWE)                | NRCS SNOTEL / CDEC                | `metloom`                            |
+| Snow-covered area, DEMs       | MODIS / VIIRS / Sentinel, 3DEP    | `easysnowdata`                       |
+| Gridded SWE                   | UA SWANN, SNODAS                  | direct                               |
+| Weather forecast              | HRRR / GFS / GEFS                 | `herbie-data` + `xarray` / `cfgrib`  |
+| Climatology forcings          | Daymet, ERA5-Land (Caravan)       | direct                               |
+| Reservoir storage & outflow   | USBR RISE, CO DWR (CDSS)          | direct REST                          |
+| Operational baselines         | NWM, CBRFC ESP, NRCS M4 monthly   | direct + NWM AWS retrospective       |
+| Model library (continuous)    | regional LSTM                     | `neuralhydrology`                    |
+| Model library (seasonal)      | quantile gradient boosting        | `catboost` (Rodeo-winner pattern)    |
+
+## Approach
+
+Two heads, two timescales:
+
+- **7-day continuous flow.** Regional LSTM (NeuralHydrology) pretrained on Caravan / CAMELS-US, fine-tuned on Yampa and analog Upper Colorado headwater basins. Features: gauge antecedents, SWE, melt-degree-days, antecedent precip, NWP forecast to D+7, upstream reservoir state. Output: P10 / P50 / P90 daily discharge for D+1..D+7.
+- **7-day peak window.** Quantile gradient-boosting model over engineered seasonal features: cumulative SWE, aspect-weighted insolation on snow-bearing terrain, antecedent flow ratios, reservoir state, NWP melt drivers. Output: probability mass over the next 14 days that the seasonal peak falls in each day, collapsed to a 7-day envelope.
+
+Validation: leave-one-water-year-out splits to avoid autocorrelation leakage. Headline metrics: KGE / NSE / PBIAS for continuous flow; peak-window hit rate and peak-day MAE for the seasonal head. **Required to beat:** CBRFC ESP and NWM medium-range on the same windows.
 
 ## Repository layout
 
 ```
-src/co_river_flow_forecast/   Python package (empty stub for now)
+src/co_river_flow_forecast/   Python package
+  data/                       Data fetchers (USGS, eventually SNOTEL, NWP, ...)
+scripts/                      Exploratory entry points
 data/                         Local data cache (gitignored)
 tests/                        Tests
 ```
 
+## Getting started
+
+```powershell
+# From the repo root, on Windows + Python 3.13:
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -e .
+
+# Pull and summarize the Yampa @ Steamboat streamflow record:
+.venv\Scripts\python.exe scripts\yampa_first_look.py
+```
+
 ## Status
 
-Project skeleton only. Nothing runs yet.
+Phase 1, day 1. USGS streamflow ingest works for Yampa @ Steamboat; nothing else is wired up yet.
 
 ## License
 
