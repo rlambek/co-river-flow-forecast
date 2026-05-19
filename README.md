@@ -87,19 +87,47 @@ python -m venv .venv
 # SNOTEL SWE summary (curated list, or --discover to re-derive):
 .venv\Scripts\python.exe scripts\basin_snotel_summary.py --basin yampa_steamboat
 
-# GFS forecast at the basin centroid for D+0..D+7:
+# Basin-mean GFS forecast for D+0..D+7 (or --centroid for single point):
 .venv\Scripts\python.exe scripts\basin_nwp_latest.py --basin yampa_steamboat
+
+# Reservoir inflow/outflow (CDSS) for the basin's registered pairs:
+.venv\Scripts\python.exe scripts\basin_reservoir_summary.py --basin yampa_steamboat
+
+# Peak-flow-day baselines via leave-one-water-year-out:
+.venv\Scripts\python.exe scripts\basin_peak_day_baseline.py --basin yampa_steamboat
 ```
 
 ## Status
 
-Phase 1 ingest is wired up for Yampa @ Steamboat:
+Phase 1 ingest is wired up for two basins (Yampa @ Steamboat and Clear Creek at Golden):
 
 - USGS daily streamflow via `dataretrieval`.
 - SNOTEL daily SWE via `metloom`, with NLDI-based upstream-polygon discovery of stations.
-- GFS surface temperature and precipitation via `herbie-data` (smoke test only — point extraction at basin centroid, D+0..D+7).
+- GFS surface temperature and precipitation via `herbie-data`, default polygon-mean over the basin (centroid extraction still available via `--centroid`).
+- Upstream reservoir inflow/outflow via CO DWR CDSS for state-tracked dams (Stagecoach on the Yampa). Front Range / municipal reservoirs (Clear Creek) await a different source.
+- A first baseline modeling head: peak-flow-day prediction from snowpack-only features, evaluated via leave-one-water-year-out. **Climatology is hard to beat with snowpack-only retrospective features** — see [baseline results](#baseline-results) below. This motivates wiring in NWP and intra-melt-season observations.
 
-Adding a new basin requires only an outlet USGS gauge ID; SNOTEL stations are discoverable, basin polygon is fetched from NLDI on demand. Reservoir/operational baselines and the modeling heads are not wired up yet.
+Adding a new basin requires only an outlet USGS gauge ID (and ideally a HUC8 and CDSS water district). Everything else — basin polygon, SNOTEL stations, NWP grid mean, reservoir pairs — is discoverable or derives automatically.
+
+### Baseline results
+
+Leave-one-water-year-out, snowpack-only features (basin-aggregate peak-SWE depth and DOY across SNOTEL stations).
+
+**Yampa @ Steamboat** (35 water years, target peak DOY mean = May 27, std = 10.8 days):
+
+| Model                | MAE (days) | 7-day hit | 14-day hit |
+| -------------------- | ---------- | --------- | ---------- |
+| Climatology (mean)   | 8.57       | 26%       | 51%        |
+| Ridge regression     | 8.44       | 23%       | 43%        |
+| Gradient boosting    | 10.09      | 23%       | 34%        |
+
+**Clear Creek at Golden** (33 water years, target peak DOY mean = Jun 16, std = 18.9 days):
+
+| Model                | MAE (days) | 7-day hit | 14-day hit |
+| -------------------- | ---------- | --------- | ---------- |
+| Climatology (mean)   | 11.81      | 15%       | 42%        |
+| Ridge regression     | 12.06      | 15%       | 33%        |
+| Gradient boosting    | 15.02      | 24%       | 39%        |
 
 ## License
 
