@@ -38,8 +38,24 @@ YAMPA_AT_STEAMBOAT = Basin(
 )
 
 
+CLEAR_CREEK_AT_GOLDEN = Basin(
+    name="Clear Creek at Golden",
+    short_name="clear_creek_golden",
+    usgs_id="06719505",
+    huc8="10190004",  # Clear Creek
+    snotel_triplets=(
+        # Discovered via NLDI on 2026-05-18 (only 1 SWE-reporting SNOTEL in basin).
+        # Front Range basins are SNOTEL-sparse; gridded SWE (SNODAS/SWANN) will
+        # matter more here than for Yampa.
+        "602:CO:SNTL",  # Loveland Basin (11,410 ft)
+    ),
+    notes="Front Range / Loveland Pass headwaters; heavy upstream diversion and reservoir activity.",
+)
+
+
 _ALL: tuple[Basin, ...] = (
     YAMPA_AT_STEAMBOAT,
+    CLEAR_CREEK_AT_GOLDEN,
 )
 
 BASINS: dict[str, Basin] = {b.short_name: b for b in _ALL}
