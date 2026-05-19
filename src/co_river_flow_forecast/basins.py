@@ -11,12 +11,27 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
+class ReservoirPair:
+    """An upstream reservoir represented by above/below stream-gauge abbrevs.
+
+    `inflow_abbrev` and `outflow_abbrev` are CDSS surface-water station
+    abbreviations (e.g. "YAMSTACO" and "YAMBSRCO" for Stagecoach Reservoir
+    on the Yampa). Net = inflow - outflow approximates daily storage change.
+    """
+    name: str
+    inflow_abbrev: str
+    outflow_abbrev: str
+
+
+@dataclass(frozen=True)
 class Basin:
     name: str                               # human-readable
     short_name: str                         # slug; filesystem- and CLI-safe
     usgs_id: str                            # USGS NWIS site number for the outlet
     huc8: str | None = None                 # USGS 8-digit hydrologic unit code
     snotel_triplets: tuple[str, ...] = field(default_factory=tuple)  # metloom-format "<id>:<state>:SNTL"
+    reservoir_pairs: tuple[ReservoirPair, ...] = field(default_factory=tuple)
+    cdss_water_district: int | None = None  # Colorado DWR water district number
     notes: str = ""
 
 
@@ -34,6 +49,13 @@ YAMPA_AT_STEAMBOAT = Basin(
         "426:CO:SNTL",   # Crosho (8,960 ft)
         "457:CO:SNTL",   # Dry Lake (8,240 ft)
     ),
+    reservoir_pairs=(
+        # Two reservoirs sit between Yampa headwaters and the Steamboat gauge.
+        # CDSS abbrevs found via scripts/basin_discover_reservoirs.py.
+        ReservoirPair("Stagecoach", "YAMSTACO", "YAMBSRCO"),
+        ReservoirPair("Lake Catamount", "YAMABCAT", "YAMOUTCO"),
+    ),
+    cdss_water_district=58,
     notes="Park Range / Rabbit Ears Pass headwaters. Daily record from 1904.",
 )
 
