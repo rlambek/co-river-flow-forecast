@@ -11,6 +11,8 @@ from typing import Iterable
 
 import pandas as pd
 
+from co_river_flow_forecast.basins import Basin
+
 HERBIE_SAVE_DIR = os.path.join("data", "cache", "herbie")
 
 # Map of output column -> herbie GRIB search string. Search strings are
@@ -75,6 +77,82 @@ def fetch_gfs_forecast_at_point(
     df = pd.DataFrame(rows)
     if "t2m_c" in df.columns:
         # Herbie/cfgrib returns 2-m temperature in kelvin
+        df["t2m_c"] = pd.to_numeric(df["t2m_c"], errors="coerce") - 273.15
+    if "apcp_mm_interval" in df.columns:
+        df["apcp_mm_interval"] = pd.to_numeric(df["apcp_mm_interval"], errors="coerce")
+    return df
+
+
+def fetch_gfs_forecast_for_basin(
+    basin: Basin,
+    init_time: datetime | str | None = None,
+    lead_hours: Iterable[int] = (0, 24, 48, 72, 96, 120, 144, 168),
+) -> pd.DataFrame:
+    """Pull GFS at every grid cell whose centroid falls inside the basin polygon,
+    and return basin-mean T2m and APCP per lead hour.
+
+    Returns the same columns as `fetch_gfs_forecast_at_point` plus `n_cells`,
+    the count of GFS 0.25-deg cells averaged at each lead.
+    """
+    from herbie import Herbie
+
+    from co_river_flow_forecast.data.basin_geometry import (
+        get_basin_polygon,
+        polygon_grid_mean,
+    )
+
+    polygon = get_basin_polygon(basin)
+    init_dt = _resolve_init_time(init_time)
+    os.makedirs(HERBIE_SAVE_DIR, exist_ok=True)
+
+    rows: list[dict] = []
+    for fxx in lead_hours:
+        fxx = int(fxx)
+        record: dict = {
+            "init_time": init_dt,
+            "lead_hour": fxx,
+            "valid_time": init_dt + timedelta(hours=fxx),
+            "t2m_c": None,
+            "apcp_mm_interval": None,
+            "n_cells": 0,
+        }
+        for col, search in GFS_SEARCH.items():
+            if col == "apcp_mm_interval" and fxx == 0:
+                record[col] = 0.0
+                continue
+            try:
+                H = Herbie(
+                    init_dt.strftime("%Y-%m-%d %H:%M"),
+                    model="gfs",
+                    fxx=fxx,
+                    save_dir=HERBIE_SAVE_DIR,
+                    verbose=False,
+                )
+                ds = H.xarray(search, remove_grib=False)
+            except Exception as exc:
+                print(f"  [warn] {col} fxx={fxx}: {exc}")
+                continue
+            var = _pick_data_var(ds, col)
+            if var is None:
+                continue
+            mean, n_cells = polygon_grid_mean(
+                ds[var].values,
+                ds["latitude"].values,
+                ds["longitude"].values,
+                polygon,
+            )
+            if mean is None:
+                # Polygon smaller than one grid cell - fall back to nearest cell.
+                lat = polygon.centroid.y
+                lon = polygon.centroid.x
+                mean = _extract_at_point(ds, lat, lon, col)
+                n_cells = 1 if mean is not None else 0
+            record[col] = mean
+            record["n_cells"] = max(record["n_cells"], n_cells)
+        rows.append(record)
+
+    df = pd.DataFrame(rows)
+    if "t2m_c" in df.columns:
         df["t2m_c"] = pd.to_numeric(df["t2m_c"], errors="coerce") - 273.15
     if "apcp_mm_interval" in df.columns:
         df["apcp_mm_interval"] = pd.to_numeric(df["apcp_mm_interval"], errors="coerce")

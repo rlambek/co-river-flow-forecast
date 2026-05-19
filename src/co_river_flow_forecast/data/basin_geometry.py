@@ -42,6 +42,47 @@ def get_basin_centroid(basin: Basin) -> tuple[float, float]:
     return float(c.y), float(c.x)
 
 
+def polygon_grid_mean(
+    values: "Any",  # 2D numpy array indexed [lat_i, lon_j]
+    lats: "Any",   # 1D array of latitudes (EPSG:4326)
+    lons: "Any",   # 1D array of longitudes (could be 0..360 or -180..180)
+    polygon: BaseGeometry,
+) -> tuple[float, int] | tuple[None, int]:
+    """Mean of grid-cell values whose centroid falls inside `polygon`.
+
+    Returns (mean_value, n_cells). If no cells' centroids are inside the
+    polygon, returns (None, 0); callers should fall back to nearest-cell.
+    """
+    import numpy as np
+    from shapely.geometry import Point
+    from shapely.prepared import prep
+
+    minlon, minlat, maxlon, maxlat = polygon.bounds
+
+    # Normalize the grid's longitude convention to match the polygon (-180..180).
+    grid_lons = np.asarray(lons, dtype=float)
+    grid_lats = np.asarray(lats, dtype=float)
+    grid_lons_180 = np.where(grid_lons > 180.0, grid_lons - 360.0, grid_lons)
+
+    lat_mask = (grid_lats >= minlat) & (grid_lats <= maxlat)
+    lon_mask = (grid_lons_180 >= minlon) & (grid_lons_180 <= maxlon)
+    lat_idx = np.where(lat_mask)[0]
+    lon_idx = np.where(lon_mask)[0]
+    if lat_idx.size == 0 or lon_idx.size == 0:
+        return None, 0
+
+    prepared = prep(polygon)
+    samples: list[float] = []
+    arr = np.asarray(values)
+    for i in lat_idx:
+        for j in lon_idx:
+            if prepared.contains(Point(float(grid_lons_180[j]), float(grid_lats[i]))):
+                samples.append(float(arr[i, j]))
+    if not samples:
+        return None, 0
+    return float(sum(samples) / len(samples)), len(samples)
+
+
 def _load_basin_geojson(basin: Basin, refresh: bool = False) -> dict[str, Any]:
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache_path = os.path.join(CACHE_DIR, f"{basin.short_name}.geojson")
