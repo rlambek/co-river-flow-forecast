@@ -31,6 +31,10 @@ class Basin:
     huc8: str | None = None                 # USGS 8-digit hydrologic unit code
     snotel_triplets: tuple[str, ...] = field(default_factory=tuple)  # metloom-format "<id>:<state>:SNTL"
     reservoir_pairs: tuple[ReservoirPair, ...] = field(default_factory=tuple)
+    contributor_usgs_ids: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    # ^ Upstream tributary or reservoir-release gauges that physically route
+    # to this basin's outlet. Each entry is (label, USGS site id). Useful for
+    # multi-state basins where reservoir_pairs (CDSS) does not apply.
     cdss_water_district: int | None = None  # Colorado DWR water district number
     notes: str = ""
 
@@ -75,9 +79,29 @@ CLEAR_CREEK_AT_GOLDEN = Basin(
 )
 
 
+GREEN_AT_GREEN_RIVER_UT = Basin(
+    name="Green River at Green River, UT (Desolation Canyon entry)",
+    short_name="green_green_river_ut",
+    usgs_id="09315000",
+    huc8=None,  # spans many HUC8s across WY/CO/UT
+    snotel_triplets=(),  # populate via scripts/basin_discover_sites.py
+    contributor_usgs_ids=(
+        # Two primary upstream sources at the natural routing points.
+        ("Green below Flaming Gorge", "09234500"),  # release gauge below USBR dam
+        ("Yampa at Deerlodge Park", "09260050"),    # last Yampa gauge before Echo Park confluence
+    ),
+    notes=(
+        "Multi-state basin (~116,000 sq mi across WY/CO/UT). Two primary inputs: "
+        "Green main stem regulated by Flaming Gorge Dam (USBR) and the unregulated "
+        "Yampa tributary. Desolation Canyon begins immediately downstream of this gauge."
+    ),
+)
+
+
 _ALL: tuple[Basin, ...] = (
     YAMPA_AT_STEAMBOAT,
     CLEAR_CREEK_AT_GOLDEN,
+    GREEN_AT_GREEN_RIVER_UT,
 )
 
 BASINS: dict[str, Basin] = {b.short_name: b for b in _ALL}
