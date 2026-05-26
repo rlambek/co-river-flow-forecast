@@ -29,13 +29,14 @@ def main(
     as_of: str | None,
     k: int,
     lookback_days: int,
+    use_swe: bool = False,
 ) -> None:
     basin = get_basin(basin_short)
     as_of_ts = pd.Timestamp(as_of) if as_of else pd.Timestamp(datetime.utcnow().date())
 
     print(f"Basin: {basin.name}")
     print(f"Target window: {target_start} -> {target_end}")
-    print(f"As of: {as_of_ts.date()}     K = {k}     lookback = {lookback_days} days")
+    print(f"As of: {as_of_ts.date()}     K = {k}     lookback = {lookback_days} days     SWE = {use_swe}")
 
     fc = forecast_with_analogs(
         basin,
@@ -44,6 +45,7 @@ def main(
         as_of=as_of_ts,
         k=k,
         lookback_days=lookback_days,
+        use_swe=use_swe,
     )
 
     print()
@@ -105,6 +107,8 @@ if __name__ == "__main__":
     p.add_argument("--as-of", default=None, help="YYYY-MM-DD (default: today)")
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--lookback", type=int, default=7)
+    p.add_argument("--with-swe", action="store_true",
+                   help="Include basin-aggregate SWE features in the state vector")
     args = p.parse_args()
     main(
         args.basin,
@@ -113,4 +117,5 @@ if __name__ == "__main__":
         args.as_of,
         args.k,
         args.lookback,
+        use_swe=args.with_swe,
     )

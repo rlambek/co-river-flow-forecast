@@ -31,12 +31,14 @@ def main(
     as_of: str,
     ks: list[int],
     lookbacks: list[int],
+    use_swe: bool = False,
 ) -> None:
     basin = get_basin(basin_short)
     month, day = (int(x) for x in as_of.split("-"))
     print(f"Backtest: {basin.name}")
     print(f"  target window: {target_start} -> {target_end}")
     print(f"  as-of (month-day): {as_of} of each year")
+    print(f"  SWE features in state vector: {use_swe}")
     print()
     print(f"  {'k':>3}  {'lookback':>8}  {'n':>3}  {'analog MAE':>11}  {'climo MAE':>10}  {'skill':>7}  {'analog MAPE':>12}  {'P10-P90 cov':>11}")
     print(f"  {'-'*3}  {'-'*8}  {'-'*3}  {'-'*11}  {'-'*10}  {'-'*7}  {'-'*12}  {'-'*11}")
@@ -53,6 +55,7 @@ def main(
                 k=k,
                 lookback_days=lb,
                 trend_days=14,
+                use_swe=use_swe,
             )
             s = backtest_summary(df)
             print(
@@ -89,9 +92,12 @@ if __name__ == "__main__":
                    help="Comma-separated K values to sweep")
     p.add_argument("--lookbacks", default="3,7,14",
                    help="Comma-separated lookback-day values to sweep")
+    p.add_argument("--with-swe", action="store_true",
+                   help="Include basin-aggregate SWE features in the state vector")
     args = p.parse_args()
     main(
         args.basin, args.target_start, args.target_end, args.as_of,
         ks=[int(x) for x in args.ks.split(",")],
         lookbacks=[int(x) for x in args.lookbacks.split(",")],
+        use_swe=args.with_swe,
     )

@@ -65,14 +65,21 @@ def build_state_vector(
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     trend_days: int = DEFAULT_TREND_DAYS,
     climo_by_doy: pd.Series | None = None,
+    swe_long: pd.DataFrame | None = None,
+    swe_indexed: pd.DataFrame | None = None,
+    swe_climo: pd.DataFrame | None = None,
 ) -> dict[str, float]:
     """Compute the feature vector summarizing recent state at `as_of`.
 
     Features (all in cfs unless otherwise noted):
-      outlet_recent       : mean discharge over [as_of - lookback, as_of]
-      outlet_trend        : (mean over last `trend_days/2`) - (mean over first half)
-      outlet_ratio_climo  : outlet_recent / same-period climatology (if provided)
-      <label>_recent      : mean discharge for each contributor over the same window
+      outlet_recent           mean discharge over [as_of - lookback, as_of]
+      outlet_trend            (recent half) - (early half) of `trend_days` window
+      outlet_ratio_climo      outlet_recent / same-period climatology
+      <label>_recent          mean discharge for each contributor (same window)
+
+    When `swe_long` is provided (long-format daily SWE across basin SNOTELs):
+      basin_swe_recent_in     mean SWE across stations, last `lookback_days`
+      basin_swe_pct_of_climo  same, as % of same-DOY median SWE
     """
     state: dict[str, float] = {}
     window = site_flow.loc[as_of - pd.Timedelta(days=lookback_days - 1) : as_of, "discharge_cfs"]
@@ -95,6 +102,18 @@ def build_state_vector(
     for label, trib in contributor_flows.items():
         w = trib.loc[as_of - pd.Timedelta(days=lookback_days - 1) : as_of, "discharge_cfs"]
         state[f"{label}_recent"] = float(w.mean()) if len(w) else float("nan")
+
+    if swe_long is not None or swe_indexed is not None:
+        # Lazy import to keep modeling/swe_cache out of the hot path for
+        # streamflow-only state vectors.
+        from co_river_flow_forecast.modeling.swe_cache import basin_swe_features
+        state.update(basin_swe_features(
+            swe_long if swe_long is not None else pd.DataFrame(),
+            as_of,
+            lookback_days=lookback_days,
+            swe_indexed=swe_indexed,
+            climo=swe_climo,
+        ))
 
     return state
 
@@ -159,14 +178,33 @@ def _forecast_from_loaded(
     lookback_days: int,
     trend_days: int,
     holdout_year: int | None,
+    swe_long: pd.DataFrame | None = None,
+    swe_indexed: pd.DataFrame | None = None,
+    swe_climo: pd.DataFrame | None = None,
 ) -> AnalogForecast:
-    """Analog forecast using pre-loaded outlet + contributor DataFrames."""
+    """Analog forecast using pre-loaded outlet + contributor DataFrames.
+
+    Pass `swe_long` (long-format SNOTEL SWE) to include basin SWE features.
+    For performance in loops, prefer passing pre-built `swe_indexed` and
+    `swe_climo` (see `swe_cache.prepare_swe_indexed` and
+    `swe_cache.precompute_swe_climatology`).
+    """
     climo_by_doy = outlet.groupby(outlet.index.dayofyear)["discharge_cfs"].median()
+
+    # Build SWE supports once per call if caller did not supply them.
+    if swe_long is not None and not swe_long.empty and swe_indexed is None:
+        from co_river_flow_forecast.modeling.swe_cache import (
+            precompute_swe_climatology, prepare_swe_indexed,
+        )
+        swe_indexed = prepare_swe_indexed(swe_long)
+        swe_climo = precompute_swe_climatology(swe_indexed)
 
     current_state = build_state_vector(
         outlet, contributors, as_of,
         lookback_days=lookback_days, trend_days=trend_days,
         climo_by_doy=climo_by_doy,
+        swe_indexed=swe_indexed,
+        swe_climo=swe_climo,
     )
 
     # Build state vector for each historical year, AS OF the same month/day.
@@ -187,6 +225,8 @@ def _forecast_from_loaded(
             outlet, contributors, as_of_y,
             lookback_days=lookback_days, trend_days=trend_days,
             climo_by_doy=climo_by_doy,
+            swe_indexed=swe_indexed,
+            swe_climo=swe_climo,
         )
 
         # Target window for year y, calendar-aligned.
@@ -236,9 +276,19 @@ def forecast_with_analogs(
     trend_days: int = DEFAULT_TREND_DAYS,
     history_start: str = "1990-10-01",
     holdout_year: int | None = None,
+    use_swe: bool = False,
 ) -> AnalogForecast:
     """Convenience wrapper: fetch data then forecast."""
     outlet, contributors = load_basin_flow(basin, history_start=history_start)
+    swe_indexed = None
+    swe_climo = None
+    if use_swe:
+        from co_river_flow_forecast.modeling.swe_cache import (
+            load_basin_swe, precompute_swe_climatology, prepare_swe_indexed,
+        )
+        swe_long = load_basin_swe(basin, start=history_start)
+        swe_indexed = prepare_swe_indexed(swe_long)
+        swe_climo = precompute_swe_climatology(swe_indexed)
     target_start = pd.Timestamp(target_start)
     target_end = pd.Timestamp(target_end)
     as_of_ts = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp(datetime.utcnow().date())
@@ -246,6 +296,8 @@ def forecast_with_analogs(
         outlet, contributors, target_start, target_end, as_of_ts,
         k=k, lookback_days=lookback_days, trend_days=trend_days,
         holdout_year=holdout_year,
+        swe_indexed=swe_indexed,
+        swe_climo=swe_climo,
     )
 
 
@@ -259,6 +311,7 @@ def backtest(
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     trend_days: int = DEFAULT_TREND_DAYS,
     history_start: str = "1990-10-01",
+    use_swe: bool = False,
 ) -> pd.DataFrame:
     """Leave-one-year-out backtest of the analog forecaster.
 
@@ -277,6 +330,16 @@ def backtest(
     # below. The previous implementation refetched per iteration and was
     # unusable in practice.
     outlet, contributors = load_basin_flow(basin, history_start=history_start)
+    swe_long: pd.DataFrame | None = None
+    swe_indexed: pd.DataFrame | None = None
+    swe_climo: pd.DataFrame | None = None
+    if use_swe:
+        from co_river_flow_forecast.modeling.swe_cache import (
+            load_basin_swe, precompute_swe_climatology, prepare_swe_indexed,
+        )
+        swe_long = load_basin_swe(basin, start=history_start)
+        swe_indexed = prepare_swe_indexed(swe_long)
+        swe_climo = precompute_swe_climatology(swe_indexed)
     years = sorted({int(ts.year) for ts in outlet.index})
 
     actuals: dict[int, float] = {}
@@ -299,6 +362,8 @@ def backtest(
                 as_of=as_of_y, k=k,
                 lookback_days=lookback_days, trend_days=trend_days,
                 holdout_year=y,
+                swe_indexed=swe_indexed,
+                swe_climo=swe_climo,
             )
         except Exception:
             continue
