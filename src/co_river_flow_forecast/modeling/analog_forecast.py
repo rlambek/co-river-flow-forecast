@@ -127,11 +127,16 @@ def find_analogs(
     current_state: dict[str, float],
     historical_states: pd.DataFrame,
     k: int,
+    feature_weights: dict[str, float] | None = None,
 ) -> pd.Series:
-    """K-NN over historical years using z-scored Euclidean distance.
+    """K-NN over historical years using z-scored, optionally weighted Euclidean.
 
     `historical_states` is a DataFrame indexed by water_year with the same
     feature columns produced by `build_state_vector`.
+
+    `feature_weights` is an optional dict mapping feature name to a relative
+    weight. Default weight = 1.0 for unspecified features. The squared
+    differences are multiplied by the weight before summing.
     """
     features = list(current_state.keys())
     historical = historical_states[features].dropna()
@@ -143,7 +148,15 @@ def find_analogs(
     historical_z = (historical - mean) / std
     current_z = (pd.Series(current_state, index=features) - mean) / std
 
-    dists = np.sqrt(((historical_z - current_z) ** 2).sum(axis=1))
+    sq_diff = (historical_z - current_z) ** 2
+    if feature_weights:
+        weights = pd.Series(
+            {f: feature_weights.get(f, 1.0) for f in features},
+            index=features,
+        )
+        sq_diff = sq_diff * weights
+
+    dists = np.sqrt(sq_diff.sum(axis=1))
     return dists.nsmallest(k)
 
 
@@ -187,6 +200,7 @@ def _forecast_from_loaded(
     swe_indexed: pd.DataFrame | None = None,
     swe_climo: pd.DataFrame | None = None,
     extra_feature_fns: tuple = (),
+    feature_weights: dict[str, float] | None = None,
 ) -> AnalogForecast:
     """Analog forecast using pre-loaded outlet + contributor DataFrames.
 
@@ -256,7 +270,7 @@ def _forecast_from_loaded(
     df = pd.DataFrame(historical_rows).set_index("_year")
     target_means = df.pop("_target_mean")
 
-    analogs = find_analogs(current_state, df, k=k)
+    analogs = find_analogs(current_state, df, k=k, feature_weights=feature_weights)
     analog_targets = target_means.loc[analogs.index]
     return AnalogForecast(
         as_of=as_of,

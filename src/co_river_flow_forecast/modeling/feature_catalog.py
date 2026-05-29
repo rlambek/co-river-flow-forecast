@@ -151,6 +151,85 @@ def feature_swe_doy_since_peak(outlet, contributors, swe_indexed, swe_climo, as_
 # Catalog (ordered)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Climate index features (ENSO MEI, PDO, AMO; require data/cache/climate)
+# ---------------------------------------------------------------------------
+
+def _climate_feature(index_name: str, key: str):
+    """Factory: a feature function that returns one climate-index value."""
+    def fn(outlet, contributors, swe_indexed, swe_climo, as_of, lookback_days):
+        from co_river_flow_forecast.data.climate_indices import (
+            index_value_for, load_climate_index,
+        )
+        try:
+            df = load_climate_index(index_name)
+        except Exception:
+            return {key: float("nan")}
+        return {key: index_value_for(df, as_of, months_back=3, lag_months=1)}
+    fn.__name__ = f"feature_climate_{index_name}"
+    return fn
+
+
+feature_climate_enso = _climate_feature("enso_mei", "climate_enso_3mo")
+feature_climate_pdo  = _climate_feature("pdo",      "climate_pdo_3mo")
+feature_climate_amo  = _climate_feature("amo",      "climate_amo_3mo")
+
+
+# ---------------------------------------------------------------------------
+# Per-station SWE features (highest-elevation SNOTELs)
+# ---------------------------------------------------------------------------
+
+def _per_station_pct_factory(rank: int):
+    """Factory: a feature that returns the `rank`-th-highest-elevation
+    station's recent-SWE % of climo. Rank is 1-based; rank=1 is the
+    snowiest (proxy for highest-elevation) station."""
+    key = f"swe_top{rank}_pct_of_climo"
+
+    def fn(outlet, contributors, swe_indexed, swe_climo, as_of, lookback_days):
+        if swe_indexed is None or swe_indexed.empty or swe_climo is None:
+            return {key: float("nan")}
+        # Rank stations by mean peak SWE (proxy for elevation).
+        station_peaks = swe_indexed.groupby(["triplet", "year"])["swe_in"].max()
+        station_mean_peak = station_peaks.groupby("triplet").mean().sort_values(ascending=False)
+        if len(station_mean_peak) < rank:
+            return {key: float("nan")}
+        target = station_mean_peak.index[rank - 1]
+
+        start = as_of - pd.Timedelta(days=lookback_days - 1)
+        recent = swe_indexed[
+            (swe_indexed["triplet"] == target)
+            & (swe_indexed["date"] >= start)
+            & (swe_indexed["date"] <= as_of)
+        ]
+        if recent.empty:
+            return {key: float("nan")}
+        # Merge with climo and compute pct.
+        cl = swe_climo[swe_climo["triplet"] == target].set_index("doy")["climo_swe"]
+        if cl.empty:
+            return {key: float("nan")}
+        pcts = []
+        for _, row in recent.iterrows():
+            cv = cl.get(int(row["doy"]))
+            if cv is None or cv <= 0:
+                continue
+            pcts.append(float(row["swe_in"] / cv))
+        if not pcts:
+            return {key: float("nan")}
+        return {key: float(sum(pcts) / len(pcts) * 100.0)}
+
+    fn.__name__ = f"feature_swe_top{rank}_pct_of_climo"
+    return fn
+
+
+feature_swe_top1 = _per_station_pct_factory(1)
+feature_swe_top2 = _per_station_pct_factory(2)
+feature_swe_top3 = _per_station_pct_factory(3)
+
+
+# ---------------------------------------------------------------------------
+# Catalog (ordered)
+# ---------------------------------------------------------------------------
+
 FEATURE_CATALOG: list[tuple[str, FeatureFn, str]] = [
     ("outlet_log_recession_rate", feature_outlet_log_recession_rate,
      "Log-linear slope of outlet discharge over lookback (recession steepness)"),
@@ -168,6 +247,19 @@ FEATURE_CATALOG: list[tuple[str, FeatureFn, str]] = [
      "Basin-mean peak SWE observed so far this water year"),
     ("swe_doy_since_peak", feature_swe_doy_since_peak,
      "Days since basin-mean SWE peak this water year (melt-start proxy)"),
+    # 2nd-round candidates from the post-mortem of the first 8.
+    ("climate_enso_3mo", feature_climate_enso,
+     "ENSO MEI v2, 3-month mean ending 1 month before as_of"),
+    ("climate_pdo_3mo", feature_climate_pdo,
+     "PDO index, 3-month mean ending 1 month before as_of"),
+    ("climate_amo_3mo", feature_climate_amo,
+     "AMO index, 3-month mean ending 1 month before as_of"),
+    ("swe_top1_pct_of_climo", feature_swe_top1,
+     "Highest-mean-peak-SWE SNOTEL: recent SWE as % of same-DOY climo"),
+    ("swe_top2_pct_of_climo", feature_swe_top2,
+     "Second-highest SNOTEL: recent SWE % of climo"),
+    ("swe_top3_pct_of_climo", feature_swe_top3,
+     "Third-highest SNOTEL: recent SWE % of climo"),
 ]
 
 
