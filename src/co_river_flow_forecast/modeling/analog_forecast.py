@@ -274,6 +274,18 @@ def _forecast_from_loaded(
     )
 
 
+def _resolve_active_extra_features(use_active_features: bool) -> tuple:
+    """Look up the list of auto-committed extra features and resolve to callables."""
+    if not use_active_features:
+        return ()
+    try:
+        from co_river_flow_forecast.modeling._active_features import ACTIVE_EXTRA_FEATURES
+        from co_river_flow_forecast.modeling.feature_catalog import get_feature_fn
+    except Exception:
+        return ()
+    return tuple(get_feature_fn(name) for name in ACTIVE_EXTRA_FEATURES)
+
+
 def forecast_with_analogs(
     basin: Basin,
     target_start: pd.Timestamp | str | date,
@@ -285,8 +297,14 @@ def forecast_with_analogs(
     history_start: str = "1990-10-01",
     holdout_year: int | None = None,
     use_swe: bool = False,
+    use_active_features: bool = True,
 ) -> AnalogForecast:
-    """Convenience wrapper: fetch data then forecast."""
+    """Convenience wrapper: fetch data then forecast.
+
+    By default includes whatever extra features have been auto-committed
+    by `scripts/feature_search.py`. Pass `use_active_features=False` to
+    fall back to the baseline state vector only.
+    """
     outlet, contributors = load_basin_flow(basin, history_start=history_start)
     swe_indexed = None
     swe_climo = None
@@ -297,6 +315,7 @@ def forecast_with_analogs(
         swe_long = load_basin_swe(basin, start=history_start)
         swe_indexed = prepare_swe_indexed(swe_long)
         swe_climo = precompute_swe_climatology(swe_indexed)
+    extra_feature_fns = _resolve_active_extra_features(use_active_features)
     target_start = pd.Timestamp(target_start)
     target_end = pd.Timestamp(target_end)
     as_of_ts = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp(datetime.utcnow().date())
@@ -306,6 +325,7 @@ def forecast_with_analogs(
         holdout_year=holdout_year,
         swe_indexed=swe_indexed,
         swe_climo=swe_climo,
+        extra_feature_fns=extra_feature_fns,
     )
 
 
