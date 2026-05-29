@@ -68,6 +68,7 @@ def build_state_vector(
     swe_long: pd.DataFrame | None = None,
     swe_indexed: pd.DataFrame | None = None,
     swe_climo: pd.DataFrame | None = None,
+    extra_feature_fns: tuple = (),
 ) -> dict[str, float]:
     """Compute the feature vector summarizing recent state at `as_of`.
 
@@ -114,6 +115,10 @@ def build_state_vector(
             swe_indexed=swe_indexed,
             climo=swe_climo,
         ))
+
+    for fn in extra_feature_fns:
+        state.update(fn(site_flow, contributor_flows, swe_indexed, swe_climo,
+                        as_of, lookback_days))
 
     return state
 
@@ -181,6 +186,7 @@ def _forecast_from_loaded(
     swe_long: pd.DataFrame | None = None,
     swe_indexed: pd.DataFrame | None = None,
     swe_climo: pd.DataFrame | None = None,
+    extra_feature_fns: tuple = (),
 ) -> AnalogForecast:
     """Analog forecast using pre-loaded outlet + contributor DataFrames.
 
@@ -205,6 +211,7 @@ def _forecast_from_loaded(
         climo_by_doy=climo_by_doy,
         swe_indexed=swe_indexed,
         swe_climo=swe_climo,
+        extra_feature_fns=extra_feature_fns,
     )
 
     # Build state vector for each historical year, AS OF the same month/day.
@@ -227,6 +234,7 @@ def _forecast_from_loaded(
             climo_by_doy=climo_by_doy,
             swe_indexed=swe_indexed,
             swe_climo=swe_climo,
+            extra_feature_fns=extra_feature_fns,
         )
 
         # Target window for year y, calendar-aligned.
