@@ -300,6 +300,17 @@ def _resolve_active_extra_features(use_active_features: bool) -> tuple:
     return tuple(get_feature_fn(name) for name in ACTIVE_EXTRA_FEATURES)
 
 
+def resolve_active_weights(use_active_features: bool) -> dict[str, float] | None:
+    """Look up the auto-committed analog-distance feature weights, if any."""
+    if not use_active_features:
+        return None
+    try:
+        from co_river_flow_forecast.modeling._active_features import ACTIVE_FEATURE_WEIGHTS
+    except Exception:
+        return None
+    return dict(ACTIVE_FEATURE_WEIGHTS) or None
+
+
 def forecast_with_analogs(
     basin: Basin,
     target_start: pd.Timestamp | str | date,
@@ -330,6 +341,7 @@ def forecast_with_analogs(
         swe_indexed = prepare_swe_indexed(swe_long)
         swe_climo = precompute_swe_climatology(swe_indexed)
     extra_feature_fns = _resolve_active_extra_features(use_active_features)
+    feature_weights = resolve_active_weights(use_active_features)
     target_start = pd.Timestamp(target_start)
     target_end = pd.Timestamp(target_end)
     as_of_ts = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp(datetime.utcnow().date())
@@ -340,6 +352,7 @@ def forecast_with_analogs(
         swe_indexed=swe_indexed,
         swe_climo=swe_climo,
         extra_feature_fns=extra_feature_fns,
+        feature_weights=feature_weights,
     )
 
 

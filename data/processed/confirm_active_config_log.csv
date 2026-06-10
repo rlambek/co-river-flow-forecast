@@ -1,0 +1,13 @@
+config,basin,n,mae
+baseline,yampa_steamboat,36,617.6250000000001
+baseline,clear_creek_golden,35,214.81904761904767
+baseline,green_green_river_ut,35,4011.666666666667
+swe_top1,yampa_steamboat,36,575.6574074074074
+swe_top1,clear_creek_golden,35,210.90952380952385
+swe_top1,green_green_river_ut,35,3778.619047619048
+swe_2x,yampa_steamboat,36,610.7453703703703
+swe_2x,clear_creek_golden,35,199.19047619047623
+swe_2x,green_green_river_ut,35,3673.0952380952376
+swe_top1_plus_swe_2x,yampa_steamboat,36,600.162037037037
+swe_top1_plus_swe_2x,clear_creek_golden,35,198.15714285714287
+swe_top1_plus_swe_2x,green_green_river_ut,35,3888.1428571428564

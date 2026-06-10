@@ -30,6 +30,7 @@ from co_river_flow_forecast.modeling.analog_forecast import (
     build_state_vector,
     find_analogs,
     load_basin_flow,
+    resolve_active_weights,
 )
 
 DEFAULT_K = 7
@@ -59,6 +60,7 @@ def analog_daily_trajectory(
     history_start: str = "1990-10-01",
     use_swe: bool = True,
     scale_to_current: bool = True,
+    use_active_features: bool = True,
 ) -> DailyTrajectory:
     outlet, contributors = load_basin_flow(basin, history_start=history_start)
     if outlet.empty:
@@ -129,7 +131,9 @@ def analog_daily_trajectory(
         raise ValueError("No analog years with full state + horizon traces.")
 
     hist_df = pd.DataFrame(rows).set_index("_year")
-    analogs = find_analogs(current_state, hist_df, k=min(k, len(hist_df)))
+    feature_weights = resolve_active_weights(use_active_features)
+    analogs = find_analogs(current_state, hist_df, k=min(k, len(hist_df)),
+                           feature_weights=feature_weights)
 
     # Scale each selected analog trace to current conditions.
     scales: dict[int, float] = {}

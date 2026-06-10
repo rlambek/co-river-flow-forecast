@@ -179,6 +179,26 @@ feature_climate_amo  = _climate_feature("amo",      "climate_amo_3mo")
 # Per-station SWE features (highest-elevation SNOTELs)
 # ---------------------------------------------------------------------------
 
+# Cache of station-by-mean-peak-SWE rankings, keyed by id(swe_indexed).
+# The ranking is static for a given basin's SWE table, but the feature fn
+# is called ~1000x per backtest, so recomputing the groupby each time
+# dominated runtime. Keyed by object id, which is stable within a run.
+_STATION_RANK_CACHE: dict[int, list[str]] = {}
+
+
+def _ranked_stations(swe_indexed) -> list[str]:
+    cache_key = id(swe_indexed)
+    cached = _STATION_RANK_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    station_peaks = swe_indexed.groupby(["triplet", "year"])["swe_in"].max()
+    ranked = list(
+        station_peaks.groupby("triplet").mean().sort_values(ascending=False).index
+    )
+    _STATION_RANK_CACHE[cache_key] = ranked
+    return ranked
+
+
 def _per_station_pct_factory(rank: int):
     """Factory: a feature that returns the `rank`-th-highest-elevation
     station's recent-SWE % of climo. Rank is 1-based; rank=1 is the
@@ -188,12 +208,11 @@ def _per_station_pct_factory(rank: int):
     def fn(outlet, contributors, swe_indexed, swe_climo, as_of, lookback_days):
         if swe_indexed is None or swe_indexed.empty or swe_climo is None:
             return {key: float("nan")}
-        # Rank stations by mean peak SWE (proxy for elevation).
-        station_peaks = swe_indexed.groupby(["triplet", "year"])["swe_in"].max()
-        station_mean_peak = station_peaks.groupby("triplet").mean().sort_values(ascending=False)
-        if len(station_mean_peak) < rank:
+        # Rank stations by mean peak SWE (proxy for elevation); cached.
+        ranked = _ranked_stations(swe_indexed)
+        if len(ranked) < rank:
             return {key: float("nan")}
-        target = station_mean_peak.index[rank - 1]
+        target = ranked[rank - 1]
 
         start = as_of - pd.Timedelta(days=lookback_days - 1)
         recent = swe_indexed[
